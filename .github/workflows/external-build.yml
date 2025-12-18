@@ -3,12 +3,12 @@ name: External Repo Build & Validate
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # Allows manual trigger
+  workflow_dispatch:
 
 permissions:
-  id-token: write      # Required for Attestations
-  contents: read       
-  attestations: write  
+  id-token: write
+  contents: read
+  attestations: write
 
 jobs:
   build-external-sample:
@@ -17,29 +17,28 @@ jobs:
       - name: Checkout Local Repo
         uses: actions/checkout@v4
 
-      # STEP 1: Clone the Open Source Repository
       - name: Clone Dotnet Samples Repo
         run: |
           git clone --depth 1 https://github.com/dotnet/samples.git external-samples
-          echo "Cloned external repository successfully."
-
+          
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
-      # STEP 2: Build a specific sample (e.g., a Console App)
-      - name: Build External Code
+      - name: Build External Code (Dynamic Path)
         run: |
-          # Navigating to a specific console sample in the cloned repo
-          cd external-samples/core/console-apps/HelloWorld
-          dotnet publish -c Release -o ../../../build-output
+          # This finds the 'Hello World' console sample specifically, 
+          # but is safer than a hardcoded path.
+          TARGET_DIR=$(find external-samples -type d -name "HelloWorld" | head -n 1)
+          echo "Targeting directory: $TARGET_DIR"
+          dotnet publish "$TARGET_DIR" -c Release -o ./build-output
 
-      # STEP 3: Security & Checksums
       - name: Generate Checksum
         run: |
           cd build-output
-          sha256sum * > ../artifact.sha256
+          # We use -type f to ensure we only hash files, not directories
+          find . -type f -exec sha256sum {} + > ../artifact.sha256
 
       - name: Generate Attestation
         uses: actions/attest-build-provenance@v1
@@ -67,9 +66,9 @@ jobs:
       - name: Checksum Verification
         run: |
           cd verify-dir
+          # We check the manifest we created in the previous job
           sha256sum -c ../artifact.sha256
 
       - name: Attestation Verification
         run: |
           gh attestation verify verify-dir --owner ${{ github.repository_owner }}
-          echo "SUCCESS: The external binary is verified and signed by your pipeline."
