@@ -1,0 +1,75 @@
+name: External Repo Build & Validate
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Allows manual trigger
+
+permissions:
+  id-token: write      # Required for Attestations
+  contents: read       
+  attestations: write  
+
+jobs:
+  build-external-sample:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Local Repo
+        uses: actions/checkout@v4
+
+      # STEP 1: Clone the Open Source Repository
+      - name: Clone Dotnet Samples Repo
+        run: |
+          git clone --depth 1 https://github.com/dotnet/samples.git external-samples
+          echo "Cloned external repository successfully."
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # STEP 2: Build a specific sample (e.g., a Console App)
+      - name: Build External Code
+        run: |
+          # Navigating to a specific console sample in the cloned repo
+          cd external-samples/core/console-apps/HelloWorld
+          dotnet publish -c Release -o ../../../build-output
+
+      # STEP 3: Security & Checksums
+      - name: Generate Checksum
+        run: |
+          cd build-output
+          sha256sum * > ../artifact.sha256
+
+      - name: Generate Attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: 'build-output/'
+
+      - name: Upload Verified Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss-verified-binary
+          path: |
+            build-output/
+            artifact.sha256
+
+  verify-integrity:
+    needs: build-external-sample
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: oss-verified-binary
+          path: verify-dir
+
+      - name: Checksum Verification
+        run: |
+          cd verify-dir
+          sha256sum -c ../artifact.sha256
+
+      - name: Attestation Verification
+        run: |
+          gh attestation verify verify-dir --owner ${{ github.repository_owner }}
+          echo "SUCCESS: The external binary is verified and signed by your pipeline."
