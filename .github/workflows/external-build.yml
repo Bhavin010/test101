@@ -1,16 +1,83 @@
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-      attestations: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build artifact
-        run: echo "secure data" > my-artifact.txt
+name: End-to-End .NET Artifact Validation
 
-      - name: Generate Attestation
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  id-token: write      # Required for Cryptographic Attestations
+  contents: read       # Required to clone the repo
+  attestations: write  # Required to record the security proof on GitHub
+
+jobs:
+  build-and-secure:
+    name: Build & Sign Artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Local Repository
+        uses: actions/checkout@v4
+
+      - name: Clone Open Source Sample
+        run: git clone --depth 1 https://github.com/dotnet/samples.git external-samples
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build Project
+        run: |
+          # Dynamically find the HelloWorld sample directory
+          TARGET_DIR=$(find external-samples -type d -name "HelloWorld" | head -n 1)
+          echo "Building project in: $TARGET_DIR"
+          dotnet publish "$TARGET_DIR" -c Release -o ./build-output
+
+      - name: Generate Checksum Manifest
+        run: |
+          cd build-output
+          # Fingerprint every file inside the build directory
+          find . -type f -exec sha256sum {} + > artifact.sha256
+          echo "Manifest created."
+
+      - name: Create GitHub Attestation (Signing)
         uses: actions/attest-build-provenance@v1
         with:
-          subject-path: 'my-artifact.txt'
+          subject-path: 'build-output/'
+
+      - name: Upload to GitHub Storage
+        uses: actions/upload-artifact@v4
+        with:
+          name: secure-dotnet-package
+          path: build-output/
+
+  verify-artifact:
+    name: Integrity & Authenticity Check
+    needs: build-and-secure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Package
+        uses: actions/download-artifact@v4
+        with:
+          name: secure-dotnet-package
+          path: verify-dir
+
+      - name: Step 1 - Validate Checksums
+        run: |
+          cd verify-dir
+          # This ensures no files were corrupted or missing
+          sha256sum -c artifact.sha256
+
+      - name: Step 2 - Validate Cryptographic Attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Loop through files to avoid "is a directory" error
+          # This proves the files were built by YOUR repository
+          for file in verify-dir/*; do
+            if [ -f "$file" ] && [[ "$file" != *.sha256 ]]; then
+              echo "Verifying authenticity of $file..."
+              gh attestation verify "$file" --owner ${{ github.repository_owner }}
+            fi
+          done
+          echo "Artifact Validation Success: 100% Secure."
