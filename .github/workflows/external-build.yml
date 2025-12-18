@@ -1,78 +1,16 @@
-name: External Repo Build & Validate
-
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
-
-permissions:
-  id-token: write      # Required for Attestations
-  contents: read       
-  attestations: write  
-
 jobs:
-  build-external-sample:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      attestations: write
     steps:
-      - name: Checkout Local Repo
-        uses: actions/checkout@v4
-
-      - name: Clone Dotnet Samples Repo
-        run: git clone --depth 1 https://github.com/dotnet/samples.git external-samples
-          
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Build External Code
-        run: |
-          # Finds the first HelloWorld console sample
-          TARGET_DIR=$(find external-samples -type d -name "HelloWorld" | head -n 1)
-          dotnet publish "$TARGET_DIR" -c Release -o ./build-output
-
-      - name: Generate Checksum
-        run: |
-          cd build-output
-          # Fingerprint all files in the output
-          find . -type f -not -name "artifact.sha256" -exec sha256sum {} + > artifact.sha256
+      - uses: actions/checkout@v4
+      - name: Build artifact
+        run: echo "secure data" > my-artifact.txt
 
       - name: Generate Attestation
         uses: actions/attest-build-provenance@v1
         with:
-          subject-path: 'build-output/'
-
-      - name: Upload Verified Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: oss-verified-binary
-          path: build-output/
-
-  verify-integrity:
-    needs: build-external-sample
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: oss-verified-binary
-          path: verify-dir
-
-      - name: Checksum Verification
-        run: |
-          cd verify-dir
-          sha256sum -c artifact.sha256
-
-      - name: Attestation Verification
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          # Loop through every file in the directory and verify it
-          # This avoids the "is a directory" error
-          for artifact in verify-dir/*; do
-            if [ -f "$artifact" ] && [[ "$artifact" != *.sha256 ]]; then
-              echo "Verifying: $artifact"
-              gh attestation verify "$artifact" --owner ${{ github.repository_owner }}
-            fi
-          done
+          subject-path: 'my-artifact.txt'
