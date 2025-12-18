@@ -64,9 +64,15 @@ jobs:
           sha256sum -c artifact.sha256
 
       - name: Attestation Verification
-        # THIS IS THE FIX: Added the GH_TOKEN environment variable
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          gh attestation verify verify-dir --owner ${{ github.repository_owner }}
-          echo "SUCCESS: Artifact is authentic and untampered."
+          # Loop through every file in the directory and verify it
+          # This avoids the "is a directory" error
+          for artifact in verify-dir/*; do
+            if [ -f "$artifact" ] && [[ "$artifact" != *.sha256 ]]; then
+              echo "Verifying: $artifact"
+              gh attestation verify "$artifact" --owner ${{ github.repository_owner }}
+            fi
+          done
