@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write
-  contents: read
-  attestations: write
+  id-token: write      # Required for Attestations
+  contents: read       
+  attestations: write  
 
 jobs:
   build-external-sample:
@@ -27,15 +27,15 @@ jobs:
 
       - name: Build External Code
         run: |
+          # Finds the first HelloWorld console sample
           TARGET_DIR=$(find external-samples -type d -name "HelloWorld" | head -n 1)
           dotnet publish "$TARGET_DIR" -c Release -o ./build-output
 
       - name: Generate Checksum
         run: |
-          # Move into the folder so the paths inside the sha256 file are relative to the folder
           cd build-output
+          # Fingerprint all files in the output
           find . -type f -not -name "artifact.sha256" -exec sha256sum {} + > artifact.sha256
-          echo "Checksums generated inside build-output/"
 
       - name: Generate Attestation
         uses: actions/attest-build-provenance@v1
@@ -46,7 +46,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: oss-verified-binary
-          path: build-output/ # Upload the whole folder contents
+          path: build-output/
 
   verify-integrity:
     needs: build-external-sample
@@ -61,9 +61,12 @@ jobs:
       - name: Checksum Verification
         run: |
           cd verify-dir
-          # Now artifact.sha256 is in the current directory (.)
           sha256sum -c artifact.sha256
 
       - name: Attestation Verification
+        # THIS IS THE FIX: Added the GH_TOKEN environment variable
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh attestation verify verify-dir --owner ${{ github.repository_owner }}
+          echo "SUCCESS: Artifact is authentic and untampered."
