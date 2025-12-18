@@ -18,27 +18,24 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Clone Dotnet Samples Repo
-        run: |
-          git clone --depth 1 https://github.com/dotnet/samples.git external-samples
+        run: git clone --depth 1 https://github.com/dotnet/samples.git external-samples
           
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
-      - name: Build External Code (Dynamic Path)
+      - name: Build External Code
         run: |
-          # This finds the 'Hello World' console sample specifically, 
-          # but is safer than a hardcoded path.
           TARGET_DIR=$(find external-samples -type d -name "HelloWorld" | head -n 1)
-          echo "Targeting directory: $TARGET_DIR"
           dotnet publish "$TARGET_DIR" -c Release -o ./build-output
 
       - name: Generate Checksum
         run: |
+          # Move into the folder so the paths inside the sha256 file are relative to the folder
           cd build-output
-          # We use -type f to ensure we only hash files, not directories
-          find . -type f -exec sha256sum {} + > ../artifact.sha256
+          find . -type f -not -name "artifact.sha256" -exec sha256sum {} + > artifact.sha256
+          echo "Checksums generated inside build-output/"
 
       - name: Generate Attestation
         uses: actions/attest-build-provenance@v1
@@ -49,9 +46,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: oss-verified-binary
-          path: |
-            build-output/
-            artifact.sha256
+          path: build-output/ # Upload the whole folder contents
 
   verify-integrity:
     needs: build-external-sample
@@ -66,8 +61,8 @@ jobs:
       - name: Checksum Verification
         run: |
           cd verify-dir
-          # We check the manifest we created in the previous job
-          sha256sum -c ../artifact.sha256
+          # Now artifact.sha256 is in the current directory (.)
+          sha256sum -c artifact.sha256
 
       - name: Attestation Verification
         run: |
